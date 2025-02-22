@@ -1,14 +1,14 @@
 {
   "expo": {
-    "name": "my-app",
-    "slug": "my-app",
-    "version": "1.0.0",
+    "name": "Mahabir Enterprises",
+    "slug": "mahabirenterprises",
+    "version": "1.0.3",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./src/assets/images/applogo.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./src/assets/images/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -17,12 +17,19 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./src/assets/images/applogo.png",
         "backgroundColor": "#ffffff"
-      }
+      },
+      "package": "com.chandan03.mahabirenterprises"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./src/assets/images/favicon.ico"
+    },
+    "owner": "chandan03",
+    "extra": {
+      "eas": {
+        "projectId": "a025b09d-31d3-449b-a820-21b33ebe6bb0"
+      }
     }
   }
 }
