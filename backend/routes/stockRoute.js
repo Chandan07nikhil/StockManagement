@@ -34,8 +34,6 @@ router.post('/add', protect, admin, async (req, res) => {
     }
 });
 
-
-
 router.put('/:id/decrease', protect, admin, async (req, res) => {
     try {
         const { quantity } = req.body;
@@ -54,7 +52,6 @@ router.put('/:id/decrease', protect, admin, async (req, res) => {
         res.status(400).json({ message: error.message });
     }
 });
-
 
 router.put('/:id/increase', protect, admin, async (req, res) => {
     try {
@@ -93,7 +90,9 @@ router.delete('/delete/:id', protect, admin, async (req, res) => {
 
 router.get("/sales-report", protect, admin, async (req, res) => {
     try {
-        let { startDate, endDate } = req.query;
+        let { startDate, endDate, page = 1, limit = 15 } = req.query;
+        page = parseInt(page);
+        limit = parseInt(limit);
 
         const isValidDate = (date) => !isNaN(new Date(date).getTime());
 
@@ -133,11 +132,20 @@ router.get("/sales-report", protect, admin, async (req, res) => {
                     totalAmount: { $multiply: ["$quantitySold", "$stockInfo.cost"] },
                 },
             },
-            { $sort: { saleDate: -1 } }
+            { $sort: { saleDate: -1 } },
+            { $skip: (page - 1) * limit },
+            { $limit: limit }
         ]);
 
+        const totalCount = await Sales.countDocuments(matchStage);
+        const totalPages = Math.ceil(totalCount / limit);
 
-        res.json(salesData);
+        res.json({
+            salesData,
+            currentPage: page,
+            totalPages,
+            totalCount,
+        });
     } catch (error) {
         res.status(500).json({ message: "Server error", error: error.message });
     }
@@ -145,86 +153,78 @@ router.get("/sales-report", protect, admin, async (req, res) => {
 
 
 router.get("/sales-report/download", protect, admin, async (req, res) => {
-  try {
-    let { startDate, endDate } = req.query;
-
-    const isValidDate = (date) => !isNaN(new Date(date).getTime());
-
-    let matchStage = {};
-    let currentDate = new Date();
-    let thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(currentDate.getDate() - 30);
-
-    if (startDate && endDate && isValidDate(startDate) && isValidDate(endDate)) {
-      matchStage.saleDate = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate),
-      };
-    } else {
-      matchStage.saleDate = {
-        $gte: thirtyDaysAgo,
-        $lte: currentDate,
-      };
-    }
-
-    const salesData = await Sales.aggregate([
-      { $match: matchStage },
-      {
-        $lookup: {
-          from: "stocks",
-          localField: "stockId",
-          foreignField: "_id",
-          as: "stockInfo",
+    try {
+      let { startDate, endDate } = req.query;
+  
+      const isValidDate = (date) => !isNaN(new Date(date).getTime());
+  
+      let matchStage = {};
+      let currentDate = new Date();
+      let thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(currentDate.getDate() - 30);
+  
+      if (startDate && endDate && isValidDate(startDate) && isValidDate(endDate)) {
+        matchStage.saleDate = {
+          $gte: new Date(startDate),
+          $lte: new Date(endDate),
+        };
+      } else {
+        matchStage.saleDate = {
+          $gte: thirtyDaysAgo,
+          $lte: currentDate,
+        };
+      }
+  
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("Sales Report");
+  
+      worksheet.columns = [
+        { header: "Product Name", key: "productName", width: 20 },
+        { header: "Quantity Sold", key: "quantitySold", width: 15 },
+        { header: "Sale Date", key: "saleDate", width: 20 },
+        { header: "Total Amount", key: "totalAmount", width: 15 },
+      ];
+  
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="sales_report.xlsx"`);
+  
+      const cursor = Sales.aggregate([
+        { $match: matchStage },
+        {
+          $lookup: {
+            from: "stocks",
+            localField: "stockId",
+            foreignField: "_id",
+            as: "stockInfo",
+          },
         },
-      },
-      { $unwind: "$stockInfo" },
-      {
-        $project: {
-          productName: "$stockInfo.productName",
-          quantitySold: 1,
-          saleDate: 1,
-          totalAmount: { $multiply: ["$quantitySold", "$stockInfo.cost"] },
+        { $unwind: "$stockInfo" },
+        {
+          $project: {
+            productName: "$stockInfo.productName",
+            quantitySold: 1,
+            saleDate: 1,
+            totalAmount: { $multiply: ["$quantitySold", "$stockInfo.cost"] },
+          },
         },
-      },
-      { $sort: { saleDate: -1 } },
-    ]);
-
-    if (salesData.length === 0) {
-      return res.status(404).json({ message: "No sales data found" });
+        { $sort: { saleDate: -1 } },
+      ]).cursor();
+  
+      for await (const data of cursor) {
+        worksheet.addRow({
+          productName: data.productName,
+          quantitySold: data.quantitySold,
+          saleDate: new Date(data.saleDate).toLocaleDateString(),
+          totalAmount: data.totalAmount,
+        });
+      }
+  
+      await workbook.xlsx.write(res);
+      res.end();
+  
+    } catch (error) {
+      res.status(500).json({ message: "Server error", error: error.message });
     }
-
-    // Create Excel file in memory (no disk write)
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet("Sales Report");
-
-    worksheet.columns = [
-      { header: "Product Name", key: "productName", width: 20 },
-      { header: "Quantity Sold", key: "quantitySold", width: 15 },
-      { header: "Sale Date", key: "saleDate", width: 20 },
-      { header: "Total Amount", key: "totalAmount", width: 15 },
-    ];
-
-    salesData.forEach((data) => {
-      worksheet.addRow({
-        productName: data.productName,
-        quantitySold: data.quantitySold,
-        saleDate: new Date(data.saleDate).toLocaleDateString(),
-        totalAmount: data.totalAmount,
-      });
-    });
-
-    // Set response headers for file download
-    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", `attachment; filename="sales_report.xlsx"`);
-
-    // Stream the file to response
-    await workbook.xlsx.write(res);
-    res.end();
-
-  } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
-  }
-});
-
-
+  });
+  
 export default router;
